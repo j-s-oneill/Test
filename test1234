@@ -1,0 +1,45 @@
+@echo off
+
+set /p serverName=Enter the server name:
+set /p databaseName=Enter the database name:
+set /p outFolderPath=Enter the output folder path:
+set /p retryCount=Enter the number of retries:
+
+REM Define the list of tables
+set "tables=Table1 Table2 Table3 Table4 Table5"
+
+REM Iterate over the list of tables
+for %%t in (%tables%) do (
+    set tableName=%%t
+    set outFilePath=%outFolderPath%\%%t.txt
+    
+    REM Initialize retry counter
+    set retry=0
+
+    :RETRY
+
+    REM Increment the retry counter
+    set /A retry+=1
+
+    REM Build the BCP command
+    set bcpCommand=bcp.exe %databaseName%.%tableName% out %outFilePath% -S %serverName% -T -c
+
+    REM Execute the BCP command
+    %bcpCommand%
+
+    REM Check the error level
+    IF %ERRORLEVEL% NEQ 0 (
+        IF %retry% LSS %retryCount% (
+            echo Error occurred for table %%t. Retrying...
+            goto RETRY
+        ) ELSE (
+            echo Error: Maximum retry attempts reached for table %%t.
+            exit /b 1
+        )
+    )
+
+    echo BCP command completed successfully for table %%t.
+)
+
+echo All BCP commands completed successfully.
+exit /b 0
