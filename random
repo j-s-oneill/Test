@@ -1,0 +1,206 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using Newtonsoft.Json.Linq;
+using NUnit.Framework;
+
+namespace ConsoleApp1.Tests
+{
+    [TestFixture]
+    public class MessageGeneratorUtilityTests
+    {
+        private MessageGeneratorUtility _generator;
+        private string _jsonTemplate;
+        private string _csvFilePath;
+
+        [SetUp]
+        public void Setup()
+        {
+            _generator = new MessageGeneratorUtility();
+            _jsonTemplate = @"
+            {
+                ""cdsTrade"": {
+                    ""tradeId"": ""CDS123456789"",
+                    ""tradeDate"": ""2024-06-04"",
+                    ""maturityDate"": ""2029-06-04"",
+                    ""notionalAmount"": 10000000,
+                    ""currency"": ""USD"",
+                    ""referenceEntity"": {
+                        ""entityId"": ""ENT123456"",
+                        ""entityName"": ""Example Corporation"",
+                        ""entityType"": ""Corporation"",
+                        ""country"": ""USA"",
+                        ""sector"": ""Financials""
+                    },
+                    ""protectionBuyer"": {
+                        ""partyId"": ""PARTY001"",
+                        ""partyName"": ""Buyer Inc.""
+                    },
+                    ""protectionSeller"": {
+                        ""partyId"": ""PARTY002"",
+                        ""partyName"": ""Seller Ltd.""
+                    },
+                    ""creditEvents"": [
+                        ""Bankruptcy"",
+                        ""Failure to Pay"",
+                        ""Restructuring""
+                    ],
+                    ""paymentSchedule"": [
+                        {
+                            ""paymentDate"": ""2024-09-04"",
+                            ""paymentAmount"": 250000,
+                            ""paymentType"": ""Premium""
+                        },
+                        {
+                            ""paymentDate"": ""2024-12-04"",
+                            ""paymentAmount"": 250000,
+                            ""paymentType"": ""Premium""
+                        },
+                        {
+                            ""paymentDate"": ""2025-03-04"",
+                            ""paymentAmount"": 250000,
+                            ""paymentType"": ""Premium""
+                        }
+                    ],
+                    ""fixedRate"": 0.05,
+                    ""spread"": 0.01,
+                    ""recoveryRate"": 0.4,
+                    ""accrualStartDate"": ""2024-06-04"",
+                    ""accrualEndDate"": ""2029-06-04"",
+                    ""documentation"": {
+                        ""contractType"": ""Standard"",
+                        ""contractVersion"": ""2024"",
+                        ""governingLaw"": ""New York""
+                    },
+                    ""underlyingAssets"": [
+                        {
+                            ""assetId"": ""ASSET001"",
+                            ""assetType"": ""Bond"",
+                            ""assetName"": ""Example Bond 2024"",
+                            ""assetMaturityDate"": ""2024-12-31"",
+                            ""couponRate"": 0.03
+                        }
+                    ],
+                    ""additionalTerms"": {
+                        ""initialMargin"": 500000,
+                        ""variationMargin"": 100000,
+                        ""collateralType"": ""Cash"",
+                        ""collateralCurrency"": ""USD""
+                    }
+                }
+            }";
+            _csvFilePath = "cdsData.csv";
+
+            // Ensure the CSV file is created for testing
+            File.WriteAllLines(_csvFilePath, new[] {
+                "tradeId,tradeDate,entityName,notionalAmount",
+                "CDS000000001,2024-06-01,Updated Corporation A,10000000",
+                "CDS000000002,2024-06-15,Updated Corporation B,20000000",
+                "CDS000000003,2024-07-01,Updated Corporation C,30000000"
+            });
+        }
+
+        [TearDown]
+        public void Teardown()
+        {
+            // Clean up the CSV file after testing
+            if (File.Exists(_csvFilePath))
+            {
+                File.Delete(_csvFilePath);
+            }
+        }
+
+        [Test]
+        public void GenerateCdsList_ShouldReturnListOfCdsObjects()
+        {
+            var cdsList = _generator.GenerateCdsList(_jsonTemplate, 10);
+            Assert.AreEqual(10, cdsList.Count);
+
+            for (int i = 0; i < 10; i++)
+            {
+                var cds = cdsList[i];
+                Assert.AreEqual($"CDS{i.ToString("D9")}", (string)cds["cdsTrade"]["tradeId"]);
+            }
+        }
+
+        [Test]
+        public void GenerateCdsListAlternative_ShouldReturnListOfCdsObjectsFromCsv()
+        {
+            var cdsList = _generator.GenerateCdsListAlternative(_jsonTemplate, _csvFilePath, 10);
+            Assert.AreEqual(10, cdsList.Count);
+
+            var csvData = ReadCsvFile(_csvFilePath);
+
+            for (int i = 0; i < 10; i++)
+            {
+                var cds = cdsList[i];
+                var data = new Dictionary<string, string>(csvData[i % csvData.Count]);
+
+                // Calculate the expected unique tradeId
+                int originalTradeId = int.Parse(data["tradeId"].Substring(3));
+                string expectedTradeId = $"CDS{(originalTradeId + (i / csvData.Count)).ToString("D9")}";
+
+                Assert.AreEqual(expectedTradeId, (string)cds["cdsTrade"]["tradeId"]);
+                Assert.AreEqual(data["tradeDate"], (string)cds["cdsTrade"]["tradeDate"]);
+                Assert.AreEqual(data["entityName"], (string)cds["cdsTrade"]["referenceEntity"]["entityName"]);
+                Assert.AreEqual(int.Parse(data["notionalAmount"]), (int)cds["cdsTrade"]["notionalAmount"]);
+            }
+        }
+
+        [Test]
+        public void CreateCdsObject_ShouldPopulateCdsObjectCorrectly()
+        {
+            var cds = _generator.CreateCdsObject(_jsonTemplate, 1);
+
+            Assert.AreEqual("CDS000000001", (string)cds["cdsTrade"]["tradeId"]);
+            Assert.AreEqual("2024-06-15", (string)cds["cdsTrade"]["tradeDate"]);
+            Assert.AreEqual("Updated Corporation B", (string)cds["cdsTrade"]["referenceEntity"]["entityName"]);
+            Assert.AreEqual(20000000, (int)cds["cdsTrade"]["notionalAmount"]);
+        }
+
+        [Test]
+        public void CreateCdsObjectAlternative_ShouldPopulateCdsObjectFromCsv()
+        {
+            var csvData = new Dictionary<string, string>
+            {
+                { "tradeId", "CDS000000004" },
+                { "tradeDate", "2024-06-01" },
+                { "entityName", "Updated Corporation A" },
+                { "notionalAmount", "10000000" }
+            };
+
+            var cds = _generator.CreateCdsObjectAlternative(_jsonTemplate, csvData);
+
+            Assert.AreEqual("CDS000000004", (string)cds["cdsTrade"]["tradeId"]);
+            Assert.AreEqual("2024-06-01", (string)cds["cdsTrade"]["tradeDate"]);
+            Assert.AreEqual("Updated Corporation A", (string)cds["cdsTrade"]["referenceEntity"]["entityName"]);
+            Assert.AreEqual(10000000, (int)cds["cdsTrade"]["notionalAmount"]);
+        }
+
+        private List<Dictionary<string, string>> ReadCsvFile(string filePath)
+        {
+            var csvData = new List<Dictionary<string, string>>();
+            var lines = File.ReadAllLines(filePath);
+
+            if (lines.Length > 0)
+            {
+                var headers = lines[0].Split(',');
+
+                for (int i = 1; i < lines.Length; i++)
+                {
+                    var values = lines[i].Split(',');
+                    var dataRow = new Dictionary<string, string>();
+
+                    for (int j = 0; j < headers.Length; j++)
+                    {
+                        dataRow[headers[j]] = values[j];
+                    }
+
+                    csvData.Add(dataRow);
+                }
+            }
+
+            return csvData;
+        }
+    }
+}
